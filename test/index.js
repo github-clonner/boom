@@ -1,18 +1,12 @@
 'use strict';
 
-// Load modules
+const Boom = require('..');
+const Code = require('@hapi/code');
+const Lab = require('@hapi/lab');
 
-const Code = require('code');
-const Boom = require('../lib');
-const Lab = require('lab');
-
-
-// Declare internals
 
 const internals = {};
 
-
-// Test shortcuts
 
 const { describe, it } = exports.lab = Lab.script();
 const expect = Code.expect;
@@ -22,15 +16,18 @@ describe('Boom', () => {
 
     it('constructs error object (new)', () => {
 
-        const err = new Boom('oops', { statusCode: 400 });
+        const err = new Boom.Boom('oops', { statusCode: 400 });
         expect(err.output.payload.message).to.equal('oops');
         expect(err.output.statusCode).to.equal(400);
+
+        expect(Object.keys(err)).to.equal(['data', 'isBoom', 'isServer', 'output']);
+        expect(JSON.stringify(err)).to.equal('{"data":null,"isBoom":true,"isServer":false,"output":{"statusCode":400,"payload":{"statusCode":400,"error":"Bad Request","message":"oops"},"headers":{}}}');
     });
 
     it('clones error object', () => {
 
         const oops = new Error('oops');
-        const err = new Boom(oops, { statusCode: 400 });
+        const err = new Boom.Boom(oops, { statusCode: 400 });
         expect(err).to.not.shallow.equal(oops);
         expect(err.output.payload.message).to.equal('oops');
         expect(err.output.statusCode).to.equal(400);
@@ -38,18 +35,62 @@ describe('Boom', () => {
 
     it('decorates error', () => {
 
-        const err = new Boom('oops', { statusCode: 400, decorate: { x: 1 } });
+        const err = new Boom.Boom('oops', { statusCode: 400, decorate: { x: 1 } });
         expect(err.output.payload.message).to.equal('oops');
         expect(err.output.statusCode).to.equal(400);
         expect(err.x).to.equal(1);
+    });
+
+    it('handles missing message', () => {
+
+        const err = new Error();
+        Boom.boomify(err);
+
+        expect(Boom.isBoom(err)).to.be.true();
+    });
+
+    it('handles missing message (class)', () => {
+
+        const Example = class extends Error {
+
+            constructor(message) {
+
+                super(message);
+                Boom.boomify(this);
+            }
+        };
+
+        const err = new Example();
+        expect(Boom.isBoom(err)).to.be.true();
     });
 
     it('throws when statusCode is not a number', () => {
 
         expect(() => {
 
-            new Boom('message', { statusCode: 'x' });
+            new Boom.Boom('message', { statusCode: 'x' });
         }).to.throw('First argument must be a number (400+): x');
+    });
+
+    it('errors on incompatible message property (prototype)', () => {
+
+        const Err = class extends Error {
+
+            get message() {
+
+                return 'x';
+            }
+        };
+
+        const err = new Err();
+        expect(() => Boom.boomify(err, { message: 'override' })).to.throw('The error is not compatible with boom');
+    });
+
+    it('errors on incompatible message property (own)', () => {
+
+        const err = new Error();
+        Object.defineProperty(err, 'message', { get: function () { } });
+        expect(() => Boom.boomify(err, { message: 'override' })).to.throw('The error is not compatible with boom');
     });
 
     it('will cast a number-string to an integer', () => {
@@ -63,7 +104,7 @@ describe('Boom', () => {
 
         for (let i = 0; i < codes.length; ++i) {
             const code = codes[i];
-            const err = new Boom('', { statusCode: code.input });
+            const err = new Boom.Boom('', { statusCode: code.input });
             expect(err.output.statusCode).to.equal(code.result);
         }
     });
@@ -72,13 +113,13 @@ describe('Boom', () => {
 
         expect(() => {
 
-            new Boom('', { statusCode: 1 / 0 });
+            new Boom.Boom('', { statusCode: 1 / 0 });
         }).to.throw('First argument must be a number (400+): null');
     });
 
     it('sets error code to unknown', () => {
 
-        const err = new Boom('', { statusCode: 999 });
+        const err = new Boom.Boom('', { statusCode: 999 });
         expect(err.output.payload.error).to.equal('Unknown');
     });
 
@@ -86,12 +127,12 @@ describe('Boom', () => {
 
         it('identifies a boom object', () => {
 
-            expect(new Boom('oops') instanceof Boom).to.be.true();
-            expect(Boom.badRequest('oops') instanceof Boom).to.be.true();
-            expect(new Error('oops') instanceof Boom).to.be.false();
-            expect(Boom.boomify(new Error('oops')) instanceof Boom).to.be.true();
-            expect({ isBoom: true } instanceof Boom).to.be.false();
-            expect(null instanceof Boom).to.be.false();
+            expect(new Boom.Boom('oops') instanceof Boom.Boom).to.be.true();
+            expect(Boom.badRequest('oops') instanceof Boom.Boom).to.be.true();
+            expect(new Error('oops') instanceof Boom.Boom).to.be.false();
+            expect(Boom.boomify(new Error('oops')) instanceof Boom.Boom).to.be.true();
+            expect({ isBoom: true } instanceof Boom.Boom).to.be.false();
+            expect(null instanceof Boom.Boom).to.be.false();
         });
     });
 
@@ -99,10 +140,20 @@ describe('Boom', () => {
 
         it('identifies a boom object', () => {
 
-            expect(Boom.isBoom(new Boom('oops'))).to.be.true();
+            expect(Boom.isBoom(new Boom.Boom('oops'))).to.be.true();
             expect(Boom.isBoom(new Error('oops'))).to.be.false();
             expect(Boom.isBoom({ isBoom: true })).to.be.false();
             expect(Boom.isBoom(null)).to.be.false();
+        });
+
+        it('returns true for valid boom object and valid status code', () => {
+
+            expect(Boom.isBoom(Boom.notFound(),404)).to.be.true();
+        });
+
+        it('returns false for valid boom object and wrong status code', () => {
+
+            expect(Boom.isBoom(Boom.notFound(),503)).to.be.false();
         });
     });
 
@@ -314,6 +365,13 @@ describe('Boom', () => {
             expect(err.output.headers['WWW-Authenticate']).to.equal('Test error="boom"');
         });
 
+        it('returns a WWW-Authenticate header when passed a scheme (no message)', () => {
+
+            const err = Boom.unauthorized(null, 'Test');
+            expect(err.output.statusCode).to.equal(401);
+            expect(err.output.headers['WWW-Authenticate']).to.equal('Test');
+        });
+
         it('returns a WWW-Authenticate header set to the schema array value', () => {
 
             const err = Boom.unauthorized(null, ['Test', 'one', 'two']);
@@ -339,9 +397,9 @@ describe('Boom', () => {
 
         it('returns a WWW-Authenticate header when passed attributes, missing error', () => {
 
-            const err = Boom.unauthorized(null, 'Test', { a: 1, b: 'something', c: null, d: 0 });
+            const err = Boom.unauthorized(null, 'Test', { a: 1, b: 'something', c: null, d: 0, e: undefined });
             expect(err.output.statusCode).to.equal(401);
-            expect(err.output.headers['WWW-Authenticate']).to.equal('Test a="1", b="something", c="", d="0"');
+            expect(err.output.headers['WWW-Authenticate']).to.equal('Test a="1", b="something", c="", d="0", e=""');
             expect(err.isMissing).to.equal(true);
         });
 
@@ -631,6 +689,19 @@ describe('Boom', () => {
         it('sets the message with the passed in message', () => {
 
             expect(Boom.failedDependency('my message').message).to.equal('my message');
+        });
+    });
+
+    describe('tooEarly()', () => {
+
+        it('returns a 425 error statusCode', () => {
+
+            expect(Boom.tooEarly().output.statusCode).to.equal(425);
+        });
+
+        it('sets the message with the passed in message', () => {
+
+            expect(Boom.tooEarly('my message').message).to.equal('my message');
         });
     });
 
@@ -957,6 +1028,37 @@ describe('Boom', () => {
                         expect(error.typeof).to.not.equal(Boom[type]);
                     }
                 });
+            });
+        });
+    });
+
+    describe('reformat()', () => {
+
+        it('displays internal server error messages in debug mode', () => {
+
+            const error = new Error('ka-boom');
+            const err = Boom.boomify(error, { statusCode: 500 });
+
+            err.reformat(false);
+            expect(err.output).to.equal({
+                statusCode: 500,
+                payload: {
+                    statusCode: 500,
+                    error: 'Internal Server Error',
+                    message: 'An internal server error occurred'
+                },
+                headers: {}
+            });
+
+            err.reformat(true);
+            expect(err.output).to.equal({
+                statusCode: 500,
+                payload: {
+                    statusCode: 500,
+                    error: 'Internal Server Error',
+                    message: 'ka-boom'
+                },
+                headers: {}
             });
         });
     });
